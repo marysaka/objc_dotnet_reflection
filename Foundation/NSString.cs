@@ -4,23 +4,23 @@ using System.Text;
 namespace FoundationBindings
 {
     [ObjectiveC.Class]
-    public interface NSString
+    public unsafe interface NSString
     {
         [ObjectiveC.Property("UTF8String")]
-        UIntPtr UTF8String { get; }
+        UIntPtr RawUTF8String { get; }
 
         char CharacterAtIndex(nuint index);
+
         [ObjectiveC.Method("initWithCharacters:length")]
-        unsafe UIntPtr InitWithCharacters(char *characters, nuint length);
+        UIntPtr InitWithCharacters(UIntPtr characters, nuint length);
 
         NSString Initialize(string str)
         {
-            unsafe
+            fixed (char *characters = str)
             {
-                fixed (char *characters = str)
-                {
-                    return ObjectiveC.ObjectiveC.CreateFromNativeInstance<NSString>(InitWithCharacters(characters, (nuint)str.Length));
-                }
+                UIntPtr newInstance = InitWithCharacters((UIntPtr)characters, (nuint)str.Length);
+
+                return ObjectiveC.ObjectiveC.CreateFromNativeInstance<NSString>(newInstance);
             }
         }
 
@@ -28,19 +28,16 @@ namespace FoundationBindings
         {
             get
             {
-                unsafe
+                byte *rawString = (byte*)RawUTF8String;
+
+                int count = 0;
+
+                while (rawString[count] != 0)
                 {
-                    byte *rawString = (byte*)UTF8String;
-
-                    int count = 0;
-
-                    while (rawString[count] != 0)
-                    {
-                        count++;
-                    }
-
-                    return Encoding.UTF8.GetString(rawString, count);
+                    count++;
                 }
+
+                return Encoding.UTF8.GetString(rawString, count);
             }
         }
     }

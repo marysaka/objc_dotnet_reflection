@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Reflection;
+using System.Text;
 using FoundationBindings;
 
 namespace ObjectiveC
@@ -8,19 +9,25 @@ namespace ObjectiveC
     {
         static void Main(string[] args)
         {
+            // Initialize
             // We are on the same assembly for now, hackaround here
             //Foundation.Initalize();
-
             ObjectiveC.Initialize(Assembly.GetAssembly(typeof(Program)),
                                   new string [] { "Foundation" });
 
             // Testing time!
-            NSString testString = ObjectiveC.CreateInstance<NSString>(InstanceCreationFlags.Alloc);
+            var testString = ObjectiveC.CreateInstance<NSString>(InstanceCreationFlags.Alloc);
             testString = testString.Initialize("nyahahahahahah!");
 
-            Console.WriteLine(testString);
             Console.WriteLine(testString.Value);
-            Console.WriteLine(testString.CharacterAtIndex(0));
+
+            StringBuilder builder = new StringBuilder();
+
+            builder.Append(testString.CharacterAtIndex(0));
+            builder.Append(testString.CharacterAtIndex(1));
+            builder.Append(testString.CharacterAtIndex(2));
+
+            Console.WriteLine(builder.ToString());
         }
     }
 }

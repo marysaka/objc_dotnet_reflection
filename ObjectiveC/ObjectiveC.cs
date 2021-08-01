@@ -609,7 +609,7 @@ namespace ObjectiveC
 
                 UIntPtr classIdentifier = GetClassIdentifierByName(type.Name);
 
-                Debug.Assert(classIdentifier != UIntPtr.Zero);
+                //Debug.Assert(classIdentifier != UIntPtr.Zero);
 
                 TypeDetail typeDetail = new TypeDetail(detailType, classIdentifier);
 
