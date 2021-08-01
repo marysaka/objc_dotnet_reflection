@@ -19,16 +19,26 @@ namespace ObjectiveC
         [DllImport(ObjectiveCRuntimeLibrary, CharSet = CharSet.Ansi, EntryPoint = "sel_registerName")]
         public static extern IntPtr GetSelectorIdentifierByName(string selectorName);
 
+        // ObjectiveC new constructor
         private const string NewObjectiveCObjectDelegateName = "NewObjectiveCObject";
-
         private delegate UIntPtr NewObjectiveCObjectDelegate(UIntPtr classIdentifier);
+        private static NewObjectiveCObjectDelegate NewObjectiveCObject;
+
+        // ObjectiveC alloc constructor
+        private const string AllocObjectiveCObjectDelegateName = "AllocObjectiveCObject";
+        private delegate UIntPtr AllocObjectiveCObjectDelegate(UIntPtr classIdentifier);
+        private static AllocObjectiveCObjectDelegate AllocObjectiveCObject;
+
+        // ObjectiveC alloc init constructor
+        private const string AllocInitObjectiveCObjectDelegateName = "AllocInitObjectiveCObject";
+        private delegate UIntPtr AllocInitObjectiveCObjectDelegate(UIntPtr classIdentifier);
+        private static AllocInitObjectiveCObjectDelegate AllocInitObjectiveCObject;
 
         private static AssemblyBuilder DynamicAssembly;
         private static ModuleBuilder DynamicModule;
 
         private static Type BaseBindingsType;
 
-        private static NewObjectiveCObjectDelegate NewObjectiveCObject;
 
         private static List<Assembly> InitializedAssemblies = new List<Assembly>();
 
@@ -60,16 +70,24 @@ namespace ObjectiveC
         {
             TypeBuilder baseBindingsBuilder = DynamicModule.DefineType("ObjectiveCBaseBindings", TypeAttributes.Public | TypeAttributes.Class);
 
-            ConstructObjectiveCNewFunction(baseBindingsBuilder);
-            // TODO: alloc, init and alloc + init
+            // Create common msgSend used by slow paths
+            MethodBuilder objcMsgSendPinvoke = CreateObjSendNativeCall(baseBindingsBuilder, typeof(nuint), new Type[] { typeof(nuint), typeof(nuint) });
+            objcMsgSendPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+            objcMsgSendPinvoke.DefineParameter(1, ParameterAttributes.In, "selector");
 
+            ConstructObjectiveCNewFunction(baseBindingsBuilder, objcMsgSendPinvoke);
+            ConstructObjectiveCAllocFunction(baseBindingsBuilder, objcMsgSendPinvoke);
+            ConstructObjectiveCAllocInitFunction(baseBindingsBuilder, objcMsgSendPinvoke);
+            
             // Finalize the class
             BaseBindingsType = baseBindingsBuilder.CreateType();
 
             NewObjectiveCObject = (NewObjectiveCObjectDelegate)BaseBindingsType.GetMethod(NewObjectiveCObjectDelegateName).CreateDelegate(typeof(NewObjectiveCObjectDelegate));
+            AllocObjectiveCObject = (AllocObjectiveCObjectDelegate)BaseBindingsType.GetMethod(AllocObjectiveCObjectDelegateName).CreateDelegate(typeof(AllocObjectiveCObjectDelegate));
+            AllocInitObjectiveCObject = (AllocInitObjectiveCObjectDelegate)BaseBindingsType.GetMethod(AllocInitObjectiveCObjectDelegateName).CreateDelegate(typeof(AllocInitObjectiveCObjectDelegate));
         }
 
-        private static void ConstructObjectiveCNewFunction(TypeBuilder builder)
+        private static void ConstructObjectiveCNewFunction(TypeBuilder builder, MethodBuilder msgSendPinvoke)
         {
             MethodBuilder newFunction = builder.DefineMethod(NewObjectiveCObjectDelegateName,
                                                         MethodAttributes.Public | MethodAttributes.Static,
@@ -115,11 +133,137 @@ namespace ObjectiveC
                     newFunctionEmitter.Emit(OpCodes.Ldc_I4, nativeSelector);
                 }
 
-                MethodBuilder slowNewPinvoke = CreateObjSendNativeCall(builder, typeof(nuint), new Type[] { typeof(nuint), typeof(nuint) });
-                slowNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
-                slowNewPinvoke.DefineParameter(1, ParameterAttributes.In, "selector");
+                newFunctionEmitter.Emit(OpCodes.Call, msgSendPinvoke);
+            }
 
-                newFunctionEmitter.Emit(OpCodes.Call, slowNewPinvoke);
+            newFunctionEmitter.Emit(OpCodes.Ret);
+        }
+        private static void ConstructObjectiveCAllocFunction(TypeBuilder builder, MethodBuilder msgSendPinvoke)
+        {
+            MethodBuilder allocFunction = builder.DefineMethod(AllocObjectiveCObjectDelegateName,
+                                                        MethodAttributes.Public | MethodAttributes.Static,
+                                                        CallingConventions.Standard,
+                                                        typeof(UIntPtr),
+                                                        new Type [] { typeof(UIntPtr) });
+
+            var allocFunctionEmitter = allocFunction.GetILGenerator();
+
+            // Load the Objective C class descriptor
+            allocFunctionEmitter.Emit(OpCodes.Ldarg_0);
+
+            // Starting with macOS 10.9, there is an optimized codepath to do that.
+            if (OperatingSystem.IsMacOSVersionAtLeast(10, 9))
+            {
+                MethodBuilder optimizedAllocPinvoke = builder.DefinePInvokeMethod("objc_alloc",
+                                                  ObjectiveCRuntimeLibrary,
+                                                  MethodAttributes.Public | MethodAttributes.Static,
+                                                  CallingConventions.Standard,
+                                                  typeof(UIntPtr),
+                                                  new Type[] { typeof(UIntPtr) },
+                                                  CallingConvention.Winapi,
+                                                  CharSet.Ansi);
+                optimizedAllocPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+
+                // DO NOT REMOVE
+                optimizedAllocPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
+
+                allocFunctionEmitter.Emit(OpCodes.Call, optimizedAllocPinvoke);
+            }
+            else
+            {
+                // Precompute at codegen to reduce runtime overhead.
+                nint nativeSelector = (nint)GetSelectorIdentifierByName("alloc");
+
+                // Load the selector.
+                if (Environment.Is64BitProcess)
+                {
+                    allocFunctionEmitter.Emit(OpCodes.Ldc_I8, nativeSelector);
+                }
+                else
+                {
+                    allocFunctionEmitter.Emit(OpCodes.Ldc_I4, nativeSelector);
+                }
+
+                allocFunctionEmitter.Emit(OpCodes.Call, msgSendPinvoke);
+            }
+
+            allocFunctionEmitter.Emit(OpCodes.Ret);
+        }
+
+        private static void ConstructObjectiveCAllocInitFunction(TypeBuilder builder, MethodBuilder msgSendPinvoke)
+        {
+            MethodBuilder newFunction = builder.DefineMethod(AllocInitObjectiveCObjectDelegateName,
+                                                        MethodAttributes.Public | MethodAttributes.Static,
+                                                        CallingConventions.Standard,
+                                                        typeof(UIntPtr),
+                                                        new Type [] { typeof(UIntPtr) });
+
+            var newFunctionEmitter = newFunction.GetILGenerator();
+
+            // Load the Objective C class descriptor
+            newFunctionEmitter.Emit(OpCodes.Ldarg_0);
+
+            // Starting with macOS 10.14.4, there is an optimized codepath to do that.
+            if (OperatingSystem.IsMacOSVersionAtLeast(10, 14, 4))
+            {
+                MethodBuilder optimizedNewPinvoke = builder.DefinePInvokeMethod("objc_alloc_init",
+                                                  ObjectiveCRuntimeLibrary,
+                                                  MethodAttributes.Public | MethodAttributes.Static,
+                                                  CallingConventions.Standard,
+                                                  typeof(UIntPtr),
+                                                  new Type[] { typeof(UIntPtr) },
+                                                  CallingConvention.Winapi,
+                                                  CharSet.Ansi);
+                optimizedNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+
+                // DO NOT REMOVE
+                optimizedNewPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
+
+                newFunctionEmitter.Emit(OpCodes.Call, optimizedNewPinvoke);
+            }
+            else
+            {
+                newFunctionEmitter.DeclareLocal(typeof(nuint));
+
+                // Precompute at codegen to reduce runtime overhead.
+                nint nativeAllocSelector = (nint)GetSelectorIdentifierByName("alloc");
+                nint nativeInitSelector = (nint)GetSelectorIdentifierByName("init");
+
+                // Load the alloc selector.
+                if (Environment.Is64BitProcess)
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I8, nativeAllocSelector);
+                }
+                else
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I4, nativeAllocSelector);
+                }
+
+                newFunctionEmitter.Emit(OpCodes.Call, msgSendPinvoke);
+
+                // Save the instance identifier first and push it again
+                // NOTE: We assume that it's index 0 because there is only one local variable.
+                newFunctionEmitter.Emit(OpCodes.Stloc_0);
+                newFunctionEmitter.Emit(OpCodes.Ldloc_0);
+
+                MethodBuilder msgSendPinvokeNoResult = CreateObjSendNativeCall(builder, typeof(void), new Type[] { typeof(nuint), typeof(nuint) });
+                msgSendPinvokeNoResult.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+                msgSendPinvokeNoResult.DefineParameter(1, ParameterAttributes.In, "selector");
+
+                // Load the init selector.
+                if (Environment.Is64BitProcess)
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I8, nativeInitSelector);
+                }
+                else
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I4, nativeInitSelector);
+                }
+
+                newFunctionEmitter.Emit(OpCodes.Call, msgSendPinvokeNoResult);
+
+                // Reload saved local to return it
+                newFunctionEmitter.Emit(OpCodes.Ldloc_0);
             }
 
             newFunctionEmitter.Emit(OpCodes.Ret);
@@ -131,7 +275,10 @@ namespace ObjectiveC
             {
                 foreach (string systemFramework in systemFrameworksRequired)
                 {
-                    LoadSystemFramework(systemFramework);
+                    if(!LoadSystemFramework(systemFramework))
+                    {
+                        throw new InvalidOperationException($"System Framework {systemFramework} required by {assembly.GetName()} couldn't be loaded!");
+                    }
                 }
 
                 foreach(Type type in assembly.GetTypes())
@@ -307,7 +454,7 @@ namespace ObjectiveC
 
         public static T CreateInstance<T>(InstanceCreationFlags creationFlags)
         {
-            if (creationFlags == InstanceCreationFlags.Invalid)
+            if (creationFlags == InstanceCreationFlags.Invalid || creationFlags == InstanceCreationFlags.Init)
             {
                 throw new ArgumentException ($"{creationFlags} is not valid");
             }
@@ -325,7 +472,14 @@ namespace ObjectiveC
             {
                 nativePointer = NewObjectiveCObject(typeDetail.ClassIdentifier);
             }
-            // TODO: alloc, init and alloc + init
+            else if (creationFlags == InstanceCreationFlags.Alloc)
+            {
+                nativePointer = AllocObjectiveCObject(typeDetail.ClassIdentifier);
+            }
+            else if (creationFlags.HasFlag(InstanceCreationFlags.Alloc) && creationFlags.HasFlag(InstanceCreationFlags.Init))
+            {
+                nativePointer = AllocInitObjectiveCObject(typeDetail.ClassIdentifier);
+            }
             else
             {
                 throw new NotImplementedException(creationFlags.ToString());

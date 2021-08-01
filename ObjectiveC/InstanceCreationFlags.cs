@@ -6,8 +6,8 @@ namespace ObjectiveC
     public enum InstanceCreationFlags : uint
     {
         Invalid = 0,
-        Alloc,
-        Init,
-        New
+        Alloc = 1 << 0,
+        Init = 1 << 1,
+        New = 1 << 2
     }
 }
