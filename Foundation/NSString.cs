@@ -9,21 +9,39 @@ namespace FoundationBindings
         [ObjectiveC.Property("UTF8String")]
         UIntPtr UTF8String { get; }
 
-        [ObjectiveC.Method("characterAtIndex")]
-        ushort CharacterAtIndex(nuint index);
+        char CharacterAtIndex(nuint index);
+        [ObjectiveC.Method("initWithCharacters:length")]
+        unsafe UIntPtr InitWithCharacters(char *characters, nuint length);
 
-        unsafe string GetValue()
+        NSString Initialize(string str)
         {
-            byte *rawString = (byte*)UTF8String;
-
-            int count = 0;
-            while (rawString[count] != 0)
+            unsafe
             {
-                count++;
+                fixed (char *characters = str)
+                {
+                    return ObjectiveC.ObjectiveC.CreateFromNativeInstance<NSString>(InitWithCharacters(characters, (nuint)str.Length));
+                }
             }
-
-            return Encoding.UTF8.GetString(rawString, count);
         }
-        // TODO
+
+        string Value
+        {
+            get
+            {
+                unsafe
+                {
+                    byte *rawString = (byte*)UTF8String;
+
+                    int count = 0;
+
+                    while (rawString[count] != 0)
+                    {
+                        count++;
+                    }
+
+                    return Encoding.UTF8.GetString(rawString, count);
+                }
+            }
+        }
     }
 }

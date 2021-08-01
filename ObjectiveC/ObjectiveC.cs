@@ -481,7 +481,6 @@ namespace ObjectiveC
                 methodAttribute = (MethodAttribute)methodAttributes[0];
             }
 
-            Console.WriteLine($"{methodInfo.Name}: {methodInfo.Attributes}");
             ParameterInfo[] infos = methodInfo.GetParameters();
             Type[] parametersTypes = GetParametersTypes(infos);
 
@@ -522,12 +521,9 @@ namespace ObjectiveC
 
             string objectiveCSelectorName = objectiveCSelectorBaseName + ":";
 
-            Console.WriteLine(objectiveCSelectorName);
 
             // Precompute at codegen to reduce runtime overhead.
             nint nativeSelector = (nint)GetSelectorIdentifierByName(objectiveCSelectorName);
-
-            Console.WriteLine(nativeSelector);
 
             // Load this
             methodImplementationIL.Emit(OpCodes.Ldarg_0);
@@ -580,7 +576,25 @@ namespace ObjectiveC
 
                 foreach (PropertyInfo propertyInfo in type.GetProperties())
                 {
-                    CreateProperty(builder, nativePointer, type, propertyInfo);
+                    bool isBlacklisted = false;
+
+                    if (propertyInfo.CanRead)
+                    {
+                        MethodInfo propertyGetMethodInfo = type.GetMethod("get_" + propertyInfo.Name);
+
+                        isBlacklisted = !propertyGetMethodInfo.Attributes.HasFlag(MethodAttributes.Abstract);
+                    }
+
+                    if (!isBlacklisted && propertyInfo.CanWrite)
+                    {
+                        MethodInfo propertySetMethodInfo = type.GetMethod("set_" + propertyInfo.Name);
+                        isBlacklisted = !propertySetMethodInfo.Attributes.HasFlag(MethodAttributes.Abstract);
+                    }
+
+                    if (!isBlacklisted)
+                    {
+                        CreateProperty(builder, nativePointer, type, propertyInfo);
+                    }
                 }
 
                 foreach (MethodInfo methodInfo in type.GetMethods())
@@ -591,12 +605,9 @@ namespace ObjectiveC
                     }
                 }
 
-                // TODO: the rest (functions ect)
-
                 Type detailType = builder.CreateType();
 
                 UIntPtr classIdentifier = GetClassIdentifierByName(type.Name);
-                Console.WriteLine(type.Name);
 
                 Debug.Assert(classIdentifier != UIntPtr.Zero);
 
@@ -604,6 +615,20 @@ namespace ObjectiveC
 
                 TypeDetailMapping.Add(type, typeDetail);
             }
+        }
+
+        public static T CreateFromNativeInstance<T>(UIntPtr nativePointer)
+        {
+            Type sourceType = typeof(T);
+
+            if (!TypeDetailMapping.TryGetValue(typeof(T), out TypeDetail typeDetail))
+            {
+                throw new InvalidOperationException($"{sourceType} is not registered as an ObjectiveC class! Make sure to call Initialize on your assembly first.");
+            }
+
+            T res = (T)Activator.CreateInstance(typeDetail.TypeImpl, new object[] { nativePointer });
+
+            return res;
         }
 
         public static T CreateInstance<T>(InstanceCreationFlags creationFlags)
