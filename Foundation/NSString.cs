@@ -9,6 +9,8 @@ namespace FoundationBindings
         [ObjectiveC.Property("UTF8String")]
         UIntPtr UTF8String { get; }
 
+        [ObjectiveC.Method("characterAtIndex")]
+        ushort CharacterAtIndex(nuint index);
 
         unsafe string GetValue()
         {

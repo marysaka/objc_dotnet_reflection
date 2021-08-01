@@ -35,6 +35,7 @@ namespace ObjectiveC
 
             Console.WriteLine(testString);
             Console.WriteLine(testString.GetValue());
+            Console.WriteLine(testString.CharacterAtIndex(0));
         }
 
         static void Main(string[] args)
@@ -46,7 +47,7 @@ namespace ObjectiveC
             ObjectiveC.Initialize(Assembly.GetAssembly(typeof(Program)), new string [] { "Foundation", "Metal" });
 
             // Testing time!
-            TestMetal();
+            //TestMetal();
             TestFoundation();
         }
     }

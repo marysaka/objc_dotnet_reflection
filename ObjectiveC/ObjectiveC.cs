@@ -427,13 +427,131 @@ namespace ObjectiveC
 
                 propertySetIL.Emit(OpCodes.Ldarg_1);
                 propertySetIL.Emit(OpCodes.Call, objcSendCall);
-                propertySetIL.Emit(OpCodes.Nop);
                 propertySetIL.Emit(OpCodes.Ret);
 
                 propertyBuilder.SetSetMethod(propertySet);
 
                 builder.DefineMethodOverride(propertySet, propertyInfo.GetSetMethod());
             }
+        }
+
+        private static void LoadArgument(ILGenerator generator, short index)
+        {
+            switch (index)
+            {
+                case 0:
+                    generator.Emit(OpCodes.Ldarg_0);
+                    break;
+                case 1:
+                    generator.Emit(OpCodes.Ldarg_1);
+                    break;
+                case 2:
+                    generator.Emit(OpCodes.Ldarg_2);
+                    break;
+                case 3:
+                    generator.Emit(OpCodes.Ldarg_3);
+                    break;
+                default:
+                    generator.Emit(OpCodes.Ldarg, index);
+                    break;
+            }
+        }
+
+        private static Type[] GetParametersTypes(ParameterInfo[] infos)
+        {
+            Type[] result = new Type[infos.Length];
+            
+            for (int i = 0; i < result.Length; i++)
+            {
+                result[i] = infos[i].ParameterType;
+            }
+
+            return result;
+        }
+
+        // TODO: figure out a way to define static functions in an easy way...
+        private static void CreateMethod(TypeBuilder builder, FieldInfo nativePointer, Type type, MethodInfo methodInfo)
+        {
+            object[] methodAttributes = methodInfo.GetCustomAttributes(typeof(MethodAttribute), false);
+
+            MethodAttribute methodAttribute = null;
+
+            if (methodAttributes.Length > 0)
+            {
+                methodAttribute = (MethodAttribute)methodAttributes[0];
+            }
+
+            Console.WriteLine($"{methodInfo.Name}: {methodInfo.Attributes}");
+            ParameterInfo[] infos = methodInfo.GetParameters();
+            Type[] parametersTypes = GetParametersTypes(infos);
+
+
+            MethodBuilder methodImplementation = builder.DefineMethod(methodInfo.Name,
+                                                        MethodAttributes.Public | MethodAttributes.Virtual,
+                                                        methodInfo.CallingConvention,
+                                                        methodInfo.ReturnType,
+                                                        parametersTypes);
+
+            // Forward the parameters name to the implementation for stacktraces.
+            for (int i = 0; i < infos.Length; i++)
+            {
+                methodImplementation.DefineParameter(i, infos[i].Attributes, infos[i].Name);
+            }
+
+            var methodImplementationIL = methodImplementation.GetILGenerator();
+
+            List<Type> objcParametersTypes = new List<Type>(parametersTypes.Length + 2);
+            objcParametersTypes.Add(typeof(nuint));
+            objcParametersTypes.Add(typeof(nuint));
+            objcParametersTypes.AddRange(parametersTypes);
+
+            MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, methodInfo.ReturnType, objcParametersTypes.ToArray());
+            objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
+            objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
+
+            string objectiveCSelectorBaseName;
+
+            if (methodAttribute != null)
+            {
+                objectiveCSelectorBaseName = methodAttribute.CustomName;
+            }
+            else
+            {
+                objectiveCSelectorBaseName = char.ToLower(methodInfo.Name[0]) + methodInfo.Name.Substring(1);
+            }
+
+            string objectiveCSelectorName = objectiveCSelectorBaseName + ":";
+
+            Console.WriteLine(objectiveCSelectorName);
+
+            // Precompute at codegen to reduce runtime overhead.
+            nint nativeSelector = (nint)GetSelectorIdentifierByName(objectiveCSelectorName);
+
+            Console.WriteLine(nativeSelector);
+
+            // Load this
+            methodImplementationIL.Emit(OpCodes.Ldarg_0);
+            methodImplementationIL.Emit(OpCodes.Ldfld, nativePointer);
+
+            if (Environment.Is64BitProcess)
+            {
+                methodImplementationIL.Emit(OpCodes.Ldc_I8, nativeSelector);
+            }
+            else
+            {
+                methodImplementationIL.Emit(OpCodes.Ldc_I4, nativeSelector);
+            }
+
+            // 0 is this, skip it
+            for (short argIndex = 1; argIndex <= parametersTypes.Length; argIndex++)
+            {
+                LoadArgument(methodImplementationIL, argIndex);
+            }
+
+            methodImplementationIL.Emit(OpCodes.Call, objcSendCall);
+            methodImplementationIL.Emit(OpCodes.Ret);
+
+            builder.DefineMethodOverride(methodImplementation, methodInfo);
         }
 
         public static bool LoadSystemFramework(string framework)
@@ -464,7 +582,16 @@ namespace ObjectiveC
                 {
                     CreateProperty(builder, nativePointer, type, propertyInfo);
                 }
-                // TODO: the rest (Attributes and functions)
+
+                foreach (MethodInfo methodInfo in type.GetMethods())
+                {
+                    if (methodInfo.Attributes.HasFlag(MethodAttributes.Abstract) && !methodInfo.Attributes.HasFlag(MethodAttributes.SpecialName))
+                    {
+                        CreateMethod(builder, nativePointer, type, methodInfo);
+                    }
+                }
+
+                // TODO: the rest (functions ect)
 
                 Type detailType = builder.CreateType();
 
