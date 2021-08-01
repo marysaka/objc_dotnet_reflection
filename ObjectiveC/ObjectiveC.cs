@@ -19,6 +19,8 @@ namespace ObjectiveC
         [DllImport(ObjectiveCRuntimeLibrary, CharSet = CharSet.Ansi, EntryPoint = "sel_registerName")]
         public static extern IntPtr GetSelectorIdentifierByName(string selectorName);
 
+        private const string NewObjectiveCObjectDelegateName = "NewObjectiveCObject";
+
         private delegate UIntPtr NewObjectiveCObjectDelegate(UIntPtr classIdentifier);
 
         private static AssemblyBuilder DynamicAssembly;
@@ -51,11 +53,25 @@ namespace ObjectiveC
 
             DynamicModule = DynamicAssembly.DefineDynamicModule(DynamicAssemblyName);
 
+            InitializeDelegates();
+        }
+
+        private static void InitializeDelegates()
+        {
             TypeBuilder baseBindingsBuilder = DynamicModule.DefineType("ObjectiveCBaseBindings", TypeAttributes.Public | TypeAttributes.Class);
 
-            // Initialize the method handlin Objective C object creation
+            ConstructObjectiveCNewFunction(baseBindingsBuilder);
+            // TODO: alloc, init and alloc + init
 
-            MethodBuilder newFunction = baseBindingsBuilder.DefineMethod("NewObjectiveCObject",
+            // Finalize the class
+            BaseBindingsType = baseBindingsBuilder.CreateType();
+
+            NewObjectiveCObject = (NewObjectiveCObjectDelegate)BaseBindingsType.GetMethod(NewObjectiveCObjectDelegateName).CreateDelegate(typeof(NewObjectiveCObjectDelegate));
+        }
+
+        private static void ConstructObjectiveCNewFunction(TypeBuilder builder)
+        {
+            MethodBuilder newFunction = builder.DefineMethod(NewObjectiveCObjectDelegateName,
                                                         MethodAttributes.Public | MethodAttributes.Static,
                                                         CallingConventions.Standard,
                                                         typeof(UIntPtr),
@@ -69,7 +85,7 @@ namespace ObjectiveC
             // Starting with macOS 10.15, there is an optimized codepath to do that.
             if (OperatingSystem.IsMacOSVersionAtLeast(10, 15))
             {
-                MethodBuilder optimizedNewPinvoke = baseBindingsBuilder.DefinePInvokeMethod("objc_opt_new",
+                MethodBuilder optimizedNewPinvoke = builder.DefinePInvokeMethod("objc_opt_new",
                                                   ObjectiveCRuntimeLibrary,
                                                   MethodAttributes.Public | MethodAttributes.Static,
                                                   CallingConventions.Standard,
@@ -78,22 +94,35 @@ namespace ObjectiveC
                                                   CallingConvention.Winapi,
                                                   CharSet.Ansi);
                 optimizedNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+
+                // DO NOT REMOVE
                 optimizedNewPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
 
                 newFunctionEmitter.Emit(OpCodes.Call, optimizedNewPinvoke);
             }
             else
             {
-                // TODO standard path
-                throw new NotImplementedException();
+                // Precompute at codegen to reduce runtime overhead.
+                nint nativeSelector = (nint)GetSelectorIdentifierByName("new");
+
+                // Load the selector.
+                if (Environment.Is64BitProcess)
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I8, nativeSelector);
+                }
+                else
+                {
+                    newFunctionEmitter.Emit(OpCodes.Ldc_I4, nativeSelector);
+                }
+
+                MethodBuilder slowNewPinvoke = CreateObjSendNativeCall(builder, typeof(nuint), new Type[] { typeof(nuint), typeof(nuint) });
+                slowNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+                slowNewPinvoke.DefineParameter(1, ParameterAttributes.In, "selector");
+
+                newFunctionEmitter.Emit(OpCodes.Call, slowNewPinvoke);
             }
 
             newFunctionEmitter.Emit(OpCodes.Ret);
-
-            // Finalize the class
-            BaseBindingsType = baseBindingsBuilder.CreateType();
-
-            NewObjectiveCObject = (NewObjectiveCObjectDelegate)BaseBindingsType.GetMethod("NewObjectiveCObject").CreateDelegate(typeof(NewObjectiveCObjectDelegate));
         }
 
         public static void Initialize(Assembly assembly, string[] systemFrameworksRequired)
@@ -199,7 +228,7 @@ namespace ObjectiveC
                 var propertySetIL = propertySet.GetILGenerator();
 
                 // Setter only have the object instance, selector passed and the value argument passed.
-                MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, null, new Type[] { typeof(UIntPtr), typeof(UIntPtr), propertyInfo.PropertyType });
+                MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, null, new Type[] { typeof(nuint), typeof(nuint), propertyInfo.PropertyType });
                 objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
                 objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
                 objcSendCall.DefineParameter(2, ParameterAttributes.In, "value");
@@ -276,8 +305,13 @@ namespace ObjectiveC
             }
         }
 
-        public static T CreateInstance<T>()
+        public static T CreateInstance<T>(InstanceCreationFlags creationFlags)
         {
+            if (creationFlags == InstanceCreationFlags.Invalid)
+            {
+                throw new ArgumentException ($"{creationFlags} is not valid");
+            }
+
             Type sourceType = typeof(T);
 
             if (!TypeDetailMapping.TryGetValue(typeof(T), out TypeDetail typeDetail))
@@ -285,7 +319,22 @@ namespace ObjectiveC
                 throw new InvalidOperationException($"{sourceType} is not registered as an ObjectiveC class! Make sure to call Initialize on your assembly first.");
             }
 
-            UIntPtr nativePointer = NewObjectiveCObject(typeDetail.ClassIdentifier);
+            UIntPtr nativePointer = UIntPtr.Zero;
+
+            if (creationFlags == InstanceCreationFlags.New)
+            {
+                nativePointer = NewObjectiveCObject(typeDetail.ClassIdentifier);
+            }
+            // TODO: alloc, init and alloc + init
+            else
+            {
+                throw new NotImplementedException(creationFlags.ToString());
+            }
+
+            if (nativePointer == UIntPtr.Zero)
+            {
+                throw new InvalidOperationException($"{sourceType} instanciation failed! Check the instance creation flags.");
+            }
 
             T res = (T)Activator.CreateInstance(typeDetail.TypeImpl, new object[] { nativePointer });
 
