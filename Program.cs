@@ -34,6 +34,7 @@ namespace ObjectiveC
             NSString testString = ObjectiveC.CreateInstance<NSString>(InstanceCreationFlags.Alloc | InstanceCreationFlags.Init);
 
             Console.WriteLine(testString);
+            Console.WriteLine(testString.GetValue());
         }
 
         static void Main(string[] args)

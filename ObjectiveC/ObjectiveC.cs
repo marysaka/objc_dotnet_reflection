@@ -327,6 +327,15 @@ namespace ObjectiveC
         {
             string propertyFullName = propertyInfo.Name;
 
+            object[] propertyAttributes = propertyInfo.GetCustomAttributes(typeof(PropertyAttribute), false);
+
+            PropertyAttribute propertyAttribute = null;
+
+            if (propertyAttributes.Length > 0)
+            {
+                propertyAttribute = (PropertyAttribute)propertyAttributes[0];
+            }
+
             PropertyBuilder propertyBuilder = builder.DefineProperty(propertyFullName, PropertyAttributes.None, propertyInfo.PropertyType, null);
 
             if (propertyInfo.CanRead)
@@ -341,7 +350,16 @@ namespace ObjectiveC
                 objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
                 objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
 
-                string objectiveCSelectorReadName = char.ToLower(propertyInfo.Name[0]) + propertyInfo.Name.Substring(1);
+                string objectiveCSelectorReadName;
+
+                if (propertyAttribute != null)
+                {
+                    objectiveCSelectorReadName = propertyAttribute.CustomReadName;
+                }
+                else
+                {
+                    objectiveCSelectorReadName = char.ToLower(propertyInfo.Name[0]) + propertyInfo.Name.Substring(1);
+                }
 
                 // Precompute at codegen to reduce runtime overhead.
                 nint nativeSelector = (nint)GetSelectorIdentifierByName(objectiveCSelectorReadName);
@@ -380,7 +398,16 @@ namespace ObjectiveC
                 objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
                 objcSendCall.DefineParameter(2, ParameterAttributes.In, "value");
 
-                string objectiveCSelectorSetName = "set" + propertyInfo.Name + ":";
+                string objectiveCSelectorSetName;
+
+                if (propertyAttribute != null)
+                {
+                    objectiveCSelectorSetName = propertyAttribute.CustomWriteName;
+                }
+                else
+                {
+                    objectiveCSelectorSetName = "set" + propertyInfo.Name + ":";
+                }
 
                 // Precompute at codegen to reduce runtime overhead.
                 nint nativeSelector = (nint)GetSelectorIdentifierByName(objectiveCSelectorSetName);
