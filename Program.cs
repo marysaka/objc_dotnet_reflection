@@ -7,6 +7,8 @@ namespace ObjectiveC
     {
         static void Main(string[] args)
         {
+            Metal.Initalize();
+
             MTLRenderPassColorAttachmentDescriptor descriptor = ObjectiveC.CreateInstance<MTLRenderPassColorAttachmentDescriptor>();
 
             Console.WriteLine("Testing objective C");

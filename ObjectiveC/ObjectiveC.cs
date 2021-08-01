@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 
 namespace ObjectiveC
 {
+    // TODO: global locking
     public static class ObjectiveC
     {
         private const string ObjectiveCRuntimeLibrary = "/usr/lib/libobjc.A.dylib";
@@ -95,10 +96,15 @@ namespace ObjectiveC
             NewObjectiveCObject = (NewObjectiveCObjectDelegate)BaseBindingsType.GetMethod("NewObjectiveCObject").CreateDelegate(typeof(NewObjectiveCObjectDelegate));
         }
 
-        public static void Initalize(Assembly assembly)
+        public static void Initialize(Assembly assembly, string[] systemFrameworksRequired)
         {
             if (!InitializedAssemblies.Contains(assembly))
             {
+                foreach (string systemFramework in systemFrameworksRequired)
+                {
+                    LoadSystemFramework(systemFramework);
+                }
+
                 foreach(Type type in assembly.GetTypes())
                 {
                     if (type.GetCustomAttributes(typeof(ClassAttribute), false).Length > 0)
@@ -227,6 +233,11 @@ namespace ObjectiveC
             }
         }
 
+        public static bool LoadSystemFramework(string framework)
+        {
+            return NativeLibrary.TryLoad($"/System/Library/Frameworks/{framework}.framework/{framework}", out _);
+        }
+
         public static void RegisterType(Type type)
         {
             object[] attributes = type.GetCustomAttributes(typeof(ClassAttribute), false);
@@ -255,6 +266,7 @@ namespace ObjectiveC
                 Type detailType = builder.CreateType();
 
                 UIntPtr classIdentifier = GetClassIdentifierByName(type.Name);
+                Console.WriteLine(type.Name);
 
                 Debug.Assert(classIdentifier != UIntPtr.Zero);
 
@@ -268,12 +280,9 @@ namespace ObjectiveC
         {
             Type sourceType = typeof(T);
 
-            // Ensure assembly init
-            Initalize(sourceType.Assembly);
-
             if (!TypeDetailMapping.TryGetValue(typeof(T), out TypeDetail typeDetail))
             {
-                throw new InvalidOperationException($"{sourceType} is not registered as an ObjectiveC class!");
+                throw new InvalidOperationException($"{sourceType} is not registered as an ObjectiveC class! Make sure to call Initialize on your assembly first.");
             }
 
             UIntPtr nativePointer = NewObjectiveCObject(typeDetail.ClassIdentifier);
