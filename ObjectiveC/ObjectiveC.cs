@@ -283,7 +283,7 @@ namespace ObjectiveC
 
                 foreach(Type type in assembly.GetTypes())
                 {
-                    if (type.GetCustomAttributes(typeof(ClassAttribute), false).Length > 0)
+                    if (GetAttribute<ClassAttribute>(type) != null)
                     {
                         RegisterType(type);
                     }
@@ -327,14 +327,7 @@ namespace ObjectiveC
         {
             string propertyFullName = propertyInfo.Name;
 
-            object[] propertyAttributes = propertyInfo.GetCustomAttributes(typeof(PropertyAttribute), false);
-
-            PropertyAttribute propertyAttribute = null;
-
-            if (propertyAttributes.Length > 0)
-            {
-                propertyAttribute = (PropertyAttribute)propertyAttributes[0];
-            }
+            PropertyAttribute propertyAttribute = GetAttribute<PropertyAttribute>(propertyInfo);
 
             PropertyBuilder propertyBuilder = builder.DefineProperty(propertyFullName, PropertyAttributes.None, propertyInfo.PropertyType, null);
 
@@ -469,17 +462,24 @@ namespace ObjectiveC
             return result;
         }
 
+        private static T GetAttribute<T>(MemberInfo memberInfo) where T: Attribute
+        {
+            object[] attributes = memberInfo.GetCustomAttributes(typeof(T), false);
+
+            T result = null;
+
+            if (attributes.Length > 0)
+            {
+                result = (T)attributes[0];
+            }
+
+            return result;
+        }
+
         // TODO: figure out a way to define static functions in an easy way...
         private static void CreateMethod(TypeBuilder builder, FieldInfo nativePointer, Type type, MethodInfo methodInfo)
         {
-            object[] methodAttributes = methodInfo.GetCustomAttributes(typeof(MethodAttribute), false);
-
-            MethodAttribute methodAttribute = null;
-
-            if (methodAttributes.Length > 0)
-            {
-                methodAttribute = (MethodAttribute)methodAttributes[0];
-            }
+            MethodAttribute methodAttribute = GetAttribute<MethodAttribute>(methodInfo);
 
             ParameterInfo[] infos = methodInfo.GetParameters();
             Type[] parametersTypes = GetParametersTypes(infos);
@@ -565,12 +565,10 @@ namespace ObjectiveC
 
         public static void RegisterType(Type type)
         {
-            object[] attributes = type.GetCustomAttributes(typeof(ClassAttribute), false);
+            ClassAttribute classAttribute = GetAttribute<ClassAttribute>(type);
 
-            if (attributes.Length > 0)
+            if (classAttribute != null)
             {
-                ClassAttribute attribute = (ClassAttribute)attributes[0];
-
                 // Define a class with a sequencial layout.... YUP that's legal and we cannot create struct via those APIs.
                 TypeAttributes typeAttributes = TypeAttributes.Public | TypeAttributes.SequentialLayout | TypeAttributes.Class;
 
@@ -615,7 +613,7 @@ namespace ObjectiveC
 
                 Type detailType = builder.CreateType();
 
-                string className = attribute.CustomName != null ? attribute.CustomName : type.Name;
+                string className = classAttribute.CustomName != null ? classAttribute.CustomName : type.Name;
 
                 UIntPtr classIdentifier = GetClassIdentifierByName(className);
 
