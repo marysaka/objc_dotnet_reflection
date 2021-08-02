@@ -615,7 +615,9 @@ namespace ObjectiveC
 
                 Type detailType = builder.CreateType();
 
-                UIntPtr classIdentifier = GetClassIdentifierByName(type.Name);
+                string className = attribute.CustomName != null ? attribute.CustomName : type.Name;
+
+                UIntPtr classIdentifier = GetClassIdentifierByName(className);
 
                 //Debug.Assert(classIdentifier != UIntPtr.Zero);
 
