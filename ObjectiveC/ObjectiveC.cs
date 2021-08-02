@@ -72,8 +72,8 @@ namespace ObjectiveC
 
             // Create common msgSend used by slow paths
             MethodBuilder objcMsgSendPinvoke = CreateObjSendNativeCall(baseBindingsBuilder, typeof(nuint), new Type[] { typeof(nuint), typeof(nuint) });
-            objcMsgSendPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
-            objcMsgSendPinvoke.DefineParameter(1, ParameterAttributes.In, "selector");
+            objcMsgSendPinvoke.DefineParameter(1, ParameterAttributes.In, "classIdentifier");
+            objcMsgSendPinvoke.DefineParameter(2, ParameterAttributes.In, "selector");
 
             ConstructObjectiveCNewFunction(baseBindingsBuilder, objcMsgSendPinvoke);
             ConstructObjectiveCAllocFunction(baseBindingsBuilder, objcMsgSendPinvoke);
@@ -111,7 +111,7 @@ namespace ObjectiveC
                                                   new Type[] { typeof(UIntPtr) },
                                                   CallingConvention.Winapi,
                                                   CharSet.Ansi);
-                optimizedNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+                optimizedNewPinvoke.DefineParameter(1, ParameterAttributes.In, "classIdentifier");
 
                 // DO NOT REMOVE
                 optimizedNewPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
@@ -162,7 +162,7 @@ namespace ObjectiveC
                                                   new Type[] { typeof(UIntPtr) },
                                                   CallingConvention.Winapi,
                                                   CharSet.Ansi);
-                optimizedAllocPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+                optimizedAllocPinvoke.DefineParameter(1, ParameterAttributes.In, "classIdentifier");
 
                 // DO NOT REMOVE
                 optimizedAllocPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
@@ -214,7 +214,7 @@ namespace ObjectiveC
                                                   new Type[] { typeof(UIntPtr) },
                                                   CallingConvention.Winapi,
                                                   CharSet.Ansi);
-                optimizedNewPinvoke.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
+                optimizedNewPinvoke.DefineParameter(1, ParameterAttributes.In, "classIdentifier");
 
                 // DO NOT REMOVE
                 optimizedNewPinvoke.SetImplementationFlags(MethodImplAttributes.PreserveSig);
@@ -247,8 +247,8 @@ namespace ObjectiveC
                 newFunctionEmitter.Emit(OpCodes.Ldloc_0);
 
                 MethodBuilder msgSendPinvokeNoResult = CreateObjSendNativeCall(builder, typeof(void), new Type[] { typeof(nuint), typeof(nuint) });
-                msgSendPinvokeNoResult.DefineParameter(0, ParameterAttributes.In, "classIdentifier");
-                msgSendPinvokeNoResult.DefineParameter(1, ParameterAttributes.In, "selector");
+                msgSendPinvokeNoResult.DefineParameter(1, ParameterAttributes.In, "classIdentifier");
+                msgSendPinvokeNoResult.DefineParameter(2, ParameterAttributes.In, "selector");
 
                 // Load the init selector.
                 if (Environment.Is64BitProcess)
@@ -293,7 +293,7 @@ namespace ObjectiveC
             }
         }
 
-        private static void CreateConstructor(TypeBuilder builder, FieldInfo nativePointer)
+        private static ConstructorInfo CreateConstructor(TypeBuilder builder, FieldInfo nativePointer)
         {
             ConstructorBuilder constructorBuilder = builder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, new Type[] { typeof(UIntPtr) });
             ILGenerator myConstructorIL = constructorBuilder.GetILGenerator();
@@ -301,7 +301,9 @@ namespace ObjectiveC
             myConstructorIL.Emit(OpCodes.Ldarg_0);
             myConstructorIL.Emit(OpCodes.Ldarg_1);
             myConstructorIL.Emit(OpCodes.Stfld, nativePointer);
-            myConstructorIL.Emit(OpCodes.Ret);            
+            myConstructorIL.Emit(OpCodes.Ret);
+
+            return constructorBuilder;
         }
 
         // TODO: have some cache at the type level
@@ -340,8 +342,8 @@ namespace ObjectiveC
 
                 // Getter only have the object instance and selector passed.
                 MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, propertyInfo.PropertyType, new Type[] { typeof(nuint), typeof(nuint) });
-                objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
-                objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
+                objcSendCall.DefineParameter(1, ParameterAttributes.In, "objectIdentifier");
+                objcSendCall.DefineParameter(2, ParameterAttributes.In, "selector");
 
                 string objectiveCSelectorReadName;
 
@@ -387,9 +389,9 @@ namespace ObjectiveC
 
                 // Setter only have the object instance, selector passed and the value argument passed.
                 MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, null, new Type[] { typeof(nuint), typeof(nuint), propertyInfo.PropertyType });
-                objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
-                objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
-                objcSendCall.DefineParameter(2, ParameterAttributes.In, "value");
+                objcSendCall.DefineParameter(1, ParameterAttributes.In, "objectIdentifier");
+                objcSendCall.DefineParameter(2, ParameterAttributes.In, "selector");
+                objcSendCall.DefineParameter(3, ParameterAttributes.In, "value");
 
                 string objectiveCSelectorSetName;
 
@@ -477,7 +479,7 @@ namespace ObjectiveC
         }
 
         // TODO: figure out a way to define static functions in an easy way...
-        private static void CreateMethod(TypeBuilder builder, FieldInfo nativePointer, Type type, MethodInfo methodInfo)
+        private static void CreateMethod(TypeBuilder builder, FieldInfo nativePointer, Type type, MethodInfo methodInfo, ConstructorInfo constructorInfo)
         {
             MethodAttribute methodAttribute = GetAttribute<MethodAttribute>(methodInfo);
 
@@ -496,7 +498,7 @@ namespace ObjectiveC
             // Forward the parameters name to the implementation for stacktraces and construct selector "path".
             for (int i = 0; i < infos.Length; i++)
             {
-                methodImplementation.DefineParameter(i, infos[i].Attributes, infos[i].Name);
+                methodImplementation.DefineParameter(i + 1, infos[i].Attributes, infos[i].Name);
 
                 // By convention first parameter name isn't found on the selector.
                 if (i > 0)
@@ -513,9 +515,17 @@ namespace ObjectiveC
             objcParametersTypes.Add(typeof(nuint));
             objcParametersTypes.AddRange(parametersTypes);
 
-            MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, methodInfo.ReturnType, objcParametersTypes.ToArray());
-            objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
-            objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
+            Type returnType = methodInfo.ReturnType;
+
+            // In case the return type is the same as our object.
+            if (methodInfo.ReturnType == type)
+            {
+                returnType = typeof(nuint);
+            }
+
+            MethodBuilder objcSendCall = CreateObjSendNativeCall(builder, returnType, objcParametersTypes.ToArray());
+            objcSendCall.DefineParameter(1, ParameterAttributes.In, "objectIdentifier");
+            objcSendCall.DefineParameter(2, ParameterAttributes.In, "selector");
 
             string objectiveCSelectorName;
 
@@ -553,6 +563,13 @@ namespace ObjectiveC
             }
 
             methodImplementationIL.Emit(OpCodes.Call, objcSendCall);
+
+            // Generate call to the constructor if same type
+            if (methodInfo.ReturnType == type)
+            {
+                methodImplementationIL.Emit(OpCodes.Newobj, constructorInfo);
+            }
+
             methodImplementationIL.Emit(OpCodes.Ret);
 
             builder.DefineMethodOverride(methodImplementation, methodInfo);
@@ -578,7 +595,7 @@ namespace ObjectiveC
                 // All interface/protocol always have a native pointer.
                 FieldInfo nativePointer = builder.DefineField("NativePointer", typeof(UIntPtr), FieldAttributes.Public);
 
-                CreateConstructor(builder, nativePointer);
+                ConstructorInfo constructorInfo = CreateConstructor(builder, nativePointer);
 
                 foreach (PropertyInfo propertyInfo in type.GetProperties())
                 {
@@ -607,7 +624,7 @@ namespace ObjectiveC
                 {
                     if (methodInfo.Attributes.HasFlag(MethodAttributes.Abstract) && !methodInfo.Attributes.HasFlag(MethodAttributes.SpecialName))
                     {
-                        CreateMethod(builder, nativePointer, type, methodInfo);
+                        CreateMethod(builder, nativePointer, type, methodInfo, constructorInfo);
                     }
                 }
 

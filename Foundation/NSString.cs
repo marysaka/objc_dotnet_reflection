@@ -1,25 +1,25 @@
 using System;
 using System.Text;
 
+using ObjectiveC;
+
 namespace FoundationBindings
 {
-    [ObjectiveC.Class]
+    [Class]
     public unsafe interface NSString
     {
-        [ObjectiveC.Property("UTF8String")]
+        [Property("UTF8String")]
         UIntPtr RawUTF8String { get; }
 
         char CharacterAtIndex(nuint index);
 
-        UIntPtr InitWithCharacters(UIntPtr characters, nuint length);
+        NSString InitWithCharacters(UIntPtr characters, nuint length);
 
         NSString Initialize(string str)
         {
             fixed (char *characters = str)
             {
-                UIntPtr newInstance = InitWithCharacters((UIntPtr)characters, (nuint)str.Length);
-
-                return ObjectiveC.ObjectiveC.CreateFromNativeInstance<NSString>(newInstance);
+                return InitWithCharacters((UIntPtr)characters, (nuint)str.Length);
             }
         }
 
