@@ -11,7 +11,6 @@ namespace FoundationBindings
 
         char CharacterAtIndex(nuint index);
 
-        [ObjectiveC.Method("initWithCharacters:length")]
         UIntPtr InitWithCharacters(UIntPtr characters, nuint length);
 
         NSString Initialize(string str)

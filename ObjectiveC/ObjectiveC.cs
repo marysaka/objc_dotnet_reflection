@@ -491,10 +491,19 @@ namespace ObjectiveC
                                                         methodInfo.ReturnType,
                                                         parametersTypes);
 
-            // Forward the parameters name to the implementation for stacktraces.
+            string selectorPath = "";
+
+            // Forward the parameters name to the implementation for stacktraces and construct selector "path".
             for (int i = 0; i < infos.Length; i++)
             {
                 methodImplementation.DefineParameter(i, infos[i].Attributes, infos[i].Name);
+
+                // By convention first parameter name isn't found on the selector.
+                if (i > 0)
+                {
+                    selectorPath += infos[i].Name;
+                    selectorPath += ":";
+                }
             }
 
             var methodImplementationIL = methodImplementation.GetILGenerator();
@@ -508,19 +517,18 @@ namespace ObjectiveC
             objcSendCall.DefineParameter(0, ParameterAttributes.In, "objectIdentifier");
             objcSendCall.DefineParameter(1, ParameterAttributes.In, "selector");
 
-            string objectiveCSelectorBaseName;
+            string objectiveCSelectorName;
 
             if (methodAttribute != null)
             {
-                objectiveCSelectorBaseName = methodAttribute.CustomName;
+                objectiveCSelectorName = methodAttribute.CustomName;
             }
             else
             {
-                objectiveCSelectorBaseName = char.ToLower(methodInfo.Name[0]) + methodInfo.Name.Substring(1);
+                string objectiveCSelectorBaseName = char.ToLower(methodInfo.Name[0]) + methodInfo.Name.Substring(1) + ":";
+
+                objectiveCSelectorName = objectiveCSelectorBaseName + selectorPath;
             }
-
-            string objectiveCSelectorName = objectiveCSelectorBaseName + ":";
-
 
             // Precompute at codegen to reduce runtime overhead.
             nint nativeSelector = (nint)GetSelectorIdentifierByName(objectiveCSelectorName);
